@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Blog Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/script.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Welcome, {{ name }} 🌟</h1>
+    <a class="logout" href="/logout">Logout</a>
+  </header>
+
+  <section class="add-blog">
+    <h2>Create a new blog</h2>
+    <form method="POST" action="/add_post">
+      <input type="text" name="title" placeholder="Blog Title" required>
+      <textarea name="content" placeholder="Write your blog..." required></textarea>
+      <button type="submit">Post</button>
+    </form>
+  </section>
+
+  <section class="blogs">
+    <h2>All Blogs</h2>
+    {% for post in posts %}
+    <div class="blog-card">
+      <h3>{{ post.title }}</h3>
+      <p>{{ post.content }}</p>
+      <small>By {% if post.is_owner %}You{% else %}Someone{% endif %} | {{ post.timestamp.strftime('%Y-%m-%d %H:%M:%S') }} UTC</small>
+      {% if post.is_owner %}
+      <div class="actions">
+        <a href="/edit_post/{{ post._id }}">Edit</a>
+        <a href="#" onclick="confirmDelete('{{ post._id }}')">Delete</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+</body>
+</html>
