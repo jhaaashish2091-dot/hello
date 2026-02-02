@@ -1,116 +1,106 @@
-from flask import Flask, render_template, request, redirect, session, url_for, flash
+from flask import Flask, render_template, request, redirect, session, url_for
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "supersecretkey")  # session secret
 
-# MongoDB Atlas connection
-MONGO_URI = os.environ.get("MONGO_URI")
+# ------------------ ENV VARIABLES ------------------
+app.secret_key = os.environ.get("SECRET_KEY", "supersecretkey123")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://aashishjha9844:High%20quality%20123@cluster0.lxhz3yk.mongodb.net/blog_db?retryWrites=true&w=majority")
+
+# ------------------ MONGO CONNECTION ------------------
 client = MongoClient(MONGO_URI)
-db = client["blog_db"]
-users_col = db["users"]
-posts_col = db["posts"]
+db = client.get_database()  # uses database from URI
+users_collection = db.users
+posts_collection = db.posts
 
-# -------------------- ROUTES -------------------- #
+# ------------------ ROUTES ------------------
 
 @app.route("/")
-def home():
-    if "username" in session:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
+def index():
+    username = session.get("username")
+    user_id = session.get("user_id")
+    
+    all_posts = list(posts_collection.find().sort("timestamp", -1))
+    
+    # Mark ownership for template
+    for post in all_posts:
+        post["is_owner"] = str(post.get("user_id")) == str(user_id)
+    
+    return render_template("dashboard.html", posts=all_posts, username=username)
 
-# --------------- SIGNUP ---------------- #
+
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
-        username = request.form.get("username").strip()
+        username = request.form.get("username")
         if not username:
-            flash("Username cannot be empty!")
-            return redirect(url_for("signup"))
-        user = users_col.find_one({"username": username})
-        if user:
-            flash("Username already exists! Try logging in.")
-            return redirect(url_for("login"))
-        user_id = users_col.insert_one({"username": username}).inserted_id
+            return "Enter a valid username"
+        
+        # Check if user exists
+        if users_collection.find_one({"username": username}):
+            return "Username already exists"
+        
+        # Insert new user
+        user = {"username": username}
+        result = users_collection.insert_one(user)
+        
         session["username"] = username
-        session["user_id"] = str(user_id)
-        return redirect(url_for("dashboard"))
+        session["user_id"] = str(result.inserted_id)
+        
+        return redirect(url_for("index"))
+    
     return render_template("signup.html")
 
-# --------------- LOGIN ---------------- #
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username").strip()
-        user = users_col.find_one({"username": username})
-        if not user:
-            flash("No account found. Please sign up.")
-            return redirect(url_for("signup"))
-        session["username"] = user["username"]
-        session["user_id"] = str(user["_id"])
-        return redirect(url_for("dashboard"))
+        username = request.form.get("username")
+        user = users_collection.find_one({"username": username})
+        
+        if user:
+            session["username"] = user["username"]
+            session["user_id"] = str(user["_id"])
+            return redirect(url_for("index"))
+        else:
+            return "No account with this username. Please sign up."
+    
     return render_template("login.html")
 
-# --------------- LOGOUT ---------------- #
+
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("index"))
 
-# --------------- DASHBOARD ---------------- #
-@app.route("/dashboard")
-def dashboard():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    all_posts = list(posts_col.find().sort("timestamp", -1))
-    return render_template("dashboard.html", posts=all_posts, user_id=session["user_id"], name=session["username"])
 
-# --------------- ADD POST ---------------- #
-@app.route("/add_post", methods=["POST"])
-def add_post():
-    if "username" not in session:
+@app.route("/create", methods=["GET", "POST"])
+def create_post():
+    if "user_id" not in session:
         return redirect(url_for("login"))
-    title = request.form.get("title").strip()
-    content = request.form.get("content").strip()
-    if title and content:
-        posts_col.insert_one({
+    
+    if request.method == "POST":
+        title = request.form.get("title")
+        content = request.form.get("content")
+        
+        if not title or not content:
+            return "Title and content required"
+        
+        post = {
+            "user_id": ObjectId(session["user_id"]),
             "title": title,
             "content": content,
-            "user_id": ObjectId(session["user_id"]),
             "timestamp": datetime.utcnow()
-        })
-    return redirect(url_for("dashboard"))
+        }
+        posts_collection.insert_one(post)
+        return redirect(url_for("index"))
+    
+    return render_template("create.html")
 
-# --------------- DELETE POST ---------------- #
-@app.route("/delete_post/<post_id>")
-def delete_post(post_id):
-    if "username" not in session:
-        return redirect(url_for("login"))
-    post = posts_col.find_one({"_id": ObjectId(post_id)})
-    if post and str(post["user_id"]) == session["user_id"]:
-        posts_col.delete_one({"_id": ObjectId(post_id)})
-    return redirect(url_for("dashboard"))
 
-# --------------- EDIT POST ---------------- #
-@app.route("/edit_post/<post_id>", methods=["GET", "POST"])
-def edit_post(post_id):
-    if "username" not in session:
-        return redirect(url_for("login"))
-    post = posts_col.find_one({"_id": ObjectId(post_id)})
-    if not post or str(post["user_id"]) != session["user_id"]:
-        return redirect(url_for("dashboard"))
-    if request.method == "POST":
-        title = request.form.get("title").strip()
-        content = request.form.get("content").strip()
-        if title and content:
-            posts_col.update_one({"_id": ObjectId(post_id)}, {"$set": {"title": title, "content": content}})
-        return redirect(url_for("dashboard"))
-    return render_template("edit_post.html", post=post)
-
-# -------------------- RUN -------------------- #
+# ------------------ RUN ------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
