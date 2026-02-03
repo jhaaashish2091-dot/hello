@@ -3,21 +3,37 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (for local development)
+load_dotenv()
 
 app = Flask(__name__)
 
 # ------------------ ENV VARIABLES ------------------
-app.secret_key = os.environ.get("SECRET_KEY", "supersecretkey123")
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://aashishjha9844:High%20quality%20123@cluster0.lxhz3yk.mongodb.net/blog_db?retryWrites=true&w=majority")
+app.secret_key = os.environ.get("SECRET_KEY")
+MONGO_URI = os.environ.get("MONGO_URI")
+
+# Validate required environment variables
+if not app.secret_key:
+    raise ValueError("⚠️ SECRET_KEY environment variable is not set!")
+if not MONGO_URI:
+    raise ValueError("⚠️ MONGO_URI environment variable is not set!")
 
 # ------------------ MONGO CONNECTION ------------------
-client = MongoClient(MONGO_URI)
-db = client.get_database()  # uses database from URI
-users_collection = db.users
-posts_collection = db.posts
+try:
+    client = MongoClient(MONGO_URI)
+    db = client.get_database()  # uses database from URI
+    users_collection = db.users
+    posts_collection = db.posts
+    # Test connection
+    client.server_info()
+    print("✅ Connected to MongoDB successfully!")
+except Exception as e:
+    print(f"❌ MongoDB connection error: {e}")
+    raise
 
 # ------------------ ROUTES ------------------
-
 @app.route("/")
 def index():
     username = session.get("username")
@@ -31,17 +47,16 @@ def index():
     
     return render_template("dashboard.html", posts=all_posts, username=username)
 
-
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
         username = request.form.get("username")
         if not username:
-            return "Enter a valid username"
+            return "Enter a valid username", 400
         
         # Check if user exists
         if users_collection.find_one({"username": username}):
-            return "Username already exists"
+            return "Username already exists", 400
         
         # Insert new user
         user = {"username": username}
@@ -54,7 +69,6 @@ def signup():
     
     return render_template("signup.html")
 
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -66,16 +80,14 @@ def login():
             session["user_id"] = str(user["_id"])
             return redirect(url_for("index"))
         else:
-            return "No account with this username. Please sign up."
+            return "No account with this username. Please sign up.", 400
     
     return render_template("login.html")
-
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("index"))
-
 
 @app.route("/create", methods=["GET", "POST"])
 def create_post():
@@ -87,10 +99,11 @@ def create_post():
         content = request.form.get("content")
         
         if not title or not content:
-            return "Title and content required"
+            return "Title and content required", 400
         
         post = {
             "user_id": ObjectId(session["user_id"]),
+            "username": session["username"],  # Store username for easier display
             "title": title,
             "content": content,
             "timestamp": datetime.utcnow()
@@ -100,7 +113,8 @@ def create_post():
     
     return render_template("create.html")
 
-
 # ------------------ RUN ------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
+
